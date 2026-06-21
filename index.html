@@ -323,8 +323,8 @@
   </div>
 
   <div class="mic-hint" id="micHint">Tap to log by voice</div>
-<button class="mic-fab" id="micFab" onclick="toggleMic('en-US')" title="Log in English" style="right:106px;">&#127482;&#127480;</button>
-<button class="mic-fab" id="micFabCN" onclick="toggleMic('zh-CN')" title="Log in Chinese">&#127464;&#127475;</button>
+  <button class="mic-fab" id="micFab" onclick="toggleMic('en-US','micFab')" title="Log in English" style="right:106px;">&#127482;&#127480;</button>
+  <button class="mic-fab" id="micFabCN" onclick="toggleMic('zh-CN','micFabCN')" title="Log in Chinese">&#127464;&#127475;</button>
   <div class="voice-toast" id="voiceToast">
     <div class="voice-transcript" id="voiceTranscript"></div>
     <div class="voice-result" id="voiceResult"></div>
@@ -588,6 +588,7 @@
   // ============================================================
   var recognition = null;
   var isListening = false;
+  var activeMicId = 'micFab';
 
   setTimeout(function() {
     var hint = document.getElementById('micHint');
@@ -595,23 +596,24 @@
     setTimeout(function() { hint.classList.remove('visible'); }, 3000);
   }, 2000);
 
-  function toggleMic(lang) {
-  if (isListening) { stopListening(); } else { startListening(lang || 'en-US'); }
-}
+  function toggleMic(lang, fabId) {
+    if (isListening) { stopListening(); } else { startListening(lang || 'en-US', fabId || 'micFab'); }
+  }
 
-  function startListening(lang) {
+  function startListening(lang, fabId) {
+    activeMicId = fabId || 'micFab';
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       showToast('error', '', 'Voice not supported in this browser. Try Chrome.');
       return;
     }
     var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
-    recognition.lang = lang || 'en-US';
+    recognition.lang = 'en-US';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onstart = function() {
       isListening = true;
-      var fab = document.getElementById('micFab');
+      var fab = document.getElementById(activeMicId);
       fab.classList.add('listening'); fab.innerHTML = '&#9209;';
       showToast('', '', 'Listening...');
     };
@@ -631,14 +633,14 @@
 
   function stopListening() {
     isListening = false;
-    var fab = document.getElementById('micFab');
+    var fab = document.getElementById(activeMicId);
     fab.classList.remove('listening'); fab.classList.remove('processing');
-    fab.innerHTML = '&#127908;';
+    fab.innerHTML = activeMicId === 'micFab' ? '&#127482;&#127480;' : '&#127464;&#127475;';
     if (recognition) { try { recognition.stop(); } catch(e) {} recognition = null; }
   }
 
   function processTranscript(transcript) {
-    var fab = document.getElementById('micFab');
+    var fab = document.getElementById(activeMicId);
     fab.classList.remove('listening'); fab.classList.add('processing'); fab.innerHTML = '&#9203;';
     showToast('', transcript, 'Understanding...');
     apiCall({ action: 'transcript', text: transcript })

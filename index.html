@@ -323,7 +323,8 @@
   </div>
 
   <div class="mic-hint" id="micHint">Tap to log by voice</div>
-  <button class="mic-fab" id="micFab" onclick="toggleMic()" title="Log by voice">&#127908;</button>
+<button class="mic-fab" id="micFab" onclick="toggleMic('en-US')" title="Log in English" style="right:106px;">&#127482;&#127480;</button>
+<button class="mic-fab" id="micFabCN" onclick="toggleMic('zh-CN')" title="Log in Chinese">&#127464;&#127475;</button>
   <div class="voice-toast" id="voiceToast">
     <div class="voice-transcript" id="voiceTranscript"></div>
     <div class="voice-result" id="voiceResult"></div>
@@ -594,18 +595,18 @@
     setTimeout(function() { hint.classList.remove('visible'); }, 3000);
   }, 2000);
 
-  function toggleMic() {
-    if (isListening) { stopListening(); } else { startListening(); }
-  }
+  function toggleMic(lang) {
+  if (isListening) { stopListening(); } else { startListening(lang || 'en-US'); }
+}
 
-  function startListening() {
+  function startListening(lang) {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       showToast('error', '', 'Voice not supported in this browser. Try Chrome.');
       return;
     }
     var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SpeechRecognition();
-    recognition.lang = '';
+    recognition.lang = lang || 'en-US';
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onstart = function() {

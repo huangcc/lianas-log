@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liana's Log</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #faf9f7; color: #2d2a26;
+      padding: 20px 20px 100px 20px; min-height: 100vh;
+      display: flex; flex-direction: column;
+    }
+    .header { flex-shrink: 0; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; color: #5c4b6e; }
+    .subtitle { font-size: 13px; color: #8a8580; }
+    .main-content { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; }
+    @media (min-width: 700px) {
+      .main-content { flex-direction: row; }
+      .left-panel { width: 340px; flex-shrink: 0; }
+      .right-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+    }
+    .card {
+      background: white; border-radius: 16px; padding: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #eae7e3;
+    }
+    .nursing-card.active { border-color: #5c4b6e; border-width: 2px; }
+    .nursing-card.paused { border-color: #d4a843; border-width: 2px; }
+    .status-badge {
+      display: inline-block; font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 4px 10px; border-radius: 20px; margin-bottom: 16px;
+    }
+    .status-badge.inactive { background: #f0eeeb; color: #8a8580; }
+    .status-badge.nursing { background: #e8dff0; color: #5c4b6e; }
+    .status-badge.paused { background: #faf0d4; color: #a07c1e; }
+    .timer-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .timer-label { font-size: 14px; color: #6b6560; }
+    .timer-value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; color: #2d2a26; }
+    .timer-value.total { font-size: 36px; color: #5c4b6e; }
+    .side-active {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: #5c4b6e; margin-right: 6px;
+      animation: pulse 1.5s infinite;
+    }
+    .side-active.paused-dot { background: #d4a843; animation: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .divider { border-top: 1px solid #eae7e3; margin: 16px 0; }
+    .section-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #5c4b6e; }
+    .recent-wrapper { display: flex; flex-direction: column; min-height: 0; }
+    @media (min-width: 700px) {
+      .recent-wrapper { flex: 1; }
+      .recent-card { flex: 1; overflow-y: auto; max-height: none; }
+    }
+    @media (max-width: 699px) { .recent-card { max-height: 300px; overflow-y: auto; } }
+    .log-entry {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 10px 0; border-bottom: 1px solid #f0eeeb; font-size: 14px;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-category { font-weight: 600; text-transform: capitalize; min-width: 65px; }
+    .log-category.nursing { color: #5c4b6e; }
+    .log-category.diaper { color: #4a8c6f; }
+    .log-category.bottle { color: #3a7ca5; }
+    .log-category.nap { color: #c27b3a; }
+    .log-category.bedtime { color: #6b5b8a; }
+    .log-detail { flex: 1; text-align: center; color: #6b6560; padding: 0 6px; }
+    .log-date { color: #8a8580; font-size: 12px; text-align: right; min-width: 54px; }
+    .log-time { color: #8a8580; font-size: 13px; text-align: right; min-width: 110px; }
+
+    /* Nursing Controls */
+    .nursing-controls { margin-top: 16px; }
+    .nc-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .nc-btn {
+      flex: 1; padding: 16px 8px; border-radius: 14px; border: 2px solid transparent;
+      font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+      text-align: center; line-height: 1.2;
+    }
+    .nc-btn:active { transform: scale(0.97); }
+    .nc-btn.left { background: #e8dff0; color: #5c4b6e; border-color: #c8b8e0; }
+    .nc-btn.left.active-side { background: #5c4b6e; color: white; border-color: #5c4b6e; }
+    .nc-btn.right { background: #e8dff0; color: #5c4b6e; border-color: #c8b8e0; }
+    .nc-btn.right.active-side { background: #5c4b6e; color: white; border-color: #5c4b6e; }
+    .nc-btn.pause-btn { background: #faf0d4; color: #a07c1e; border-color: #e8d4a0; }
+    .nc-btn.pause-btn.is-paused { background: #d4a843; color: white; border-color: #d4a843; }
+    .nc-btn.done-btn { background: #f0f8f0; color: #4a8c6f; border-color: #b8d8c8; }
+    .nc-btn:disabled { opacity: 0.35; cursor: default; }
+    .nc-status { font-size: 12px; color: #8a8580; text-align: center; margin-top: 4px; height: 16px; }
+
+    /* Quick Log */
+    .quick-log { margin-top: 16px; }
+    .ql-row { margin-bottom: 12px; }
+    .ql-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #8a8580; margin-bottom: 6px; }
+    .ql-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ql-btn {
+      padding: 8px 14px; border-radius: 10px; border: 1px solid #ddd;
+      background: #f8f7f5; font-size: 13px; color: #4a4540; cursor: pointer; transition: all 0.15s;
+    }
+    .ql-btn:hover { border-color: #5c4b6e; color: #5c4b6e; }
+    .ql-btn.selected { background: #5c4b6e; color: white; border-color: #5c4b6e; }
+    .ql-time-row { display: flex; gap: 6px; flex-wrap: wrap; max-height: 120px; overflow-y: auto; padding: 2px 0; }
+    .ql-time-btn { padding: 6px 10px; border-radius: 10px; border: 1px solid #ddd; background: #f8f7f5; font-size: 12px; color: #4a4540; cursor: pointer; min-width: 42px; text-align: center; }
+    .ql-time-btn:hover { border-color: #5c4b6e; }
+    .ql-time-btn.selected { background: #5c4b6e; color: white; border-color: #5c4b6e; }
+    .ql-submit {
+      padding: 10px 24px; border-radius: 10px; border: none;
+      background: #5c4b6e; color: white; font-size: 14px; font-weight: 600;
+      cursor: pointer; margin-top: 8px; width: 100%;
+    }
+    .ql-submit:disabled { background: #ccc; cursor: default; }
+    .ql-submit:hover:not(:disabled) { background: #4a3c5c; }
+    .ql-status { font-size: 13px; color: #4a8c6f; margin-top: 8px; text-align: center; }
+    .ql-detail-row { display: none; }
+    .ql-detail-row.visible { display: block; }
+
+    /* Bottom sections */
+    .bottom-sections { flex-shrink: 0; margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+    @media (min-width: 700px) { .bottom-sections { flex-direction: row; } .bottom-sections > * { flex: 1; } }
+    .commands-card {
+      background: white; border-radius: 16px; padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #eae7e3;
+    }
+    .commands-toggle {
+      display: flex; justify-content: space-between; align-items: center;
+      cursor: pointer; -webkit-user-select: none; user-select: none;
+    }
+    .commands-toggle .arrow { font-size: 14px; color: #8a8580; transition: transform 0.2s; }
+    .commands-toggle .arrow.open { transform: rotate(180deg); }
+    .commands-list { display: none; margin-top: 14px; }
+    .commands-list.open { display: block; }
+    @media (min-width: 700px) {
+      .commands-list.open { display: flex; gap: 32px; flex-wrap: wrap; }
+      .cmd-group { min-width: 180px; }
+    }
+    .cmd-group-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #8a8580; margin-top: 14px; margin-bottom: 6px; }
+    .cmd-group-title:first-child { margin-top: 0; }
+    .cmd-item { font-size: 13px; color: #4a4540; padding: 3px 0; font-family: 'SF Mono', 'Menlo', monospace; }
+    .no-session { text-align: center; padding: 20px 0; color: #8a8580; font-size: 14px; }
+    .error-note {
+      background: #fef3f0; border: 1px solid #f0c6b8; border-radius: 10px;
+      padding: 12px 16px; font-size: 13px; color: #8a4a30; margin-bottom: 16px; display: none;
+    }
+    .refresh-btn { display: inline-block; margin-top: 8px; padding: 6px 14px; background: #5c4b6e; color: white; border: none; border-radius: 8px; font-size: 13px; cursor: pointer; }
+
+    /* Floating Mic Button */
+    .mic-fab {
+      position: fixed; bottom: 28px; right: 28px;
+      width: 68px; height: 68px; border-radius: 50%;
+      background: #5c4b6e; color: white; border: none;
+      box-shadow: 0 4px 16px rgba(92,75,110,0.45);
+      font-size: 28px; cursor: pointer; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+    }
+    .mic-fab:hover { background: #4a3c5c; transform: scale(1.05); }
+    .mic-fab.listening { background: #c0392b; box-shadow: 0 4px 24px rgba(192,57,43,0.5); animation: mic-pulse 1.2s infinite; }
+    .mic-fab.processing { background: #a07c1e; animation: none; }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 4px 24px rgba(192,57,43,0.5); }
+      50% { box-shadow: 0 4px 40px rgba(192,57,43,0.8), 0 0 0 12px rgba(192,57,43,0.15); }
+    }
+    .voice-toast {
+      position: fixed; bottom: 110px; right: 20px; left: 20px;
+      max-width: 340px; margin: 0 auto;
+      background: #2d2a26; color: white;
+      border-radius: 14px; padding: 14px 18px;
+      font-size: 15px; z-index: 999;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      opacity: 0; transform: translateY(10px);
+      transition: all 0.25s; pointer-events: none;
+    }
+    .voice-toast.visible { opacity: 1; transform: translateY(0); }
+    .voice-toast.success { background: #2d6a4f; }
+    .voice-toast.error { background: #7b2d2d; }
+    .voice-transcript { font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 4px; }
+    .voice-result { font-weight: 600; }
+    .mic-hint { position: fixed; bottom: 34px; right: 106px; font-size: 13px; color: #8a8580; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+    .mic-hint.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Liana's Log</h1>
+    <p class="subtitle" id="lastUpdate">Loading...</p>
+  </div>
+
+  <div class="error-note" id="errorNote">
+    Dashboard can't auto-refresh.<br>
+    <button class="refresh-btn" onclick="location.reload()">Tap to refresh</button>
+  </div>
+
+  <div class="main-content">
+    <div class="left-panel">
+      <div class="section-title">Active Nursing Session</div>
+      <div class="card nursing-card" id="nursingCard">
+        <div id="nursingContent">
+          <div class="no-session">No active nursing session</div>
+        </div>
+        <div class="nursing-controls">
+          <div class="nc-row">
+            <button class="nc-btn left" id="ncLeft" onclick="nursingAction('left_breast')">&#x25C0; Left boob</button>
+            <button class="nc-btn right" id="ncRight" onclick="nursingAction('right_breast')">Right boob &#x25B6;</button>
+          </div>
+          <div class="nc-row">
+            <button class="nc-btn pause-btn" id="ncPause" onclick="nursingAction('pause_feeding')" disabled>&#x23F8; Pause</button>
+            <button class="nc-btn done-btn" id="ncDone" onclick="nursingAction('done_feeding')" disabled>&#x2713; Done</button>
+          </div>
+          <div class="nc-status" id="ncStatus"></div>
+        </div>
+      </div>
+
+      <div class="quick-log">
+        <div class="section-title">Quick Log</div>
+        <div class="card">
+          <div class="ql-row">
+            <div class="ql-label">What</div>
+            <div class="ql-buttons" id="qlCategory">
+              <button class="ql-btn" onclick="selectCategory('pee_diaper','pee')">Pee</button>
+              <button class="ql-btn" onclick="selectCategory('poop_diaper','poop')">Poop</button>
+              <button class="ql-btn" onclick="selectCategory('mixed_diaper','both')">Both</button>
+              <button class="ql-btn" onclick="selectCategory('bottle','bottle')">Bottle</button>
+              <button class="ql-btn" onclick="selectCategory('nap_start','nap start')">Nap</button>
+              <button class="ql-btn" onclick="selectCategory('nap_end','nap end')">Nap End</button>
+            </div>
+          </div>
+          <div class="ql-row ql-detail-row" id="qlBottleRow">
+            <div class="ql-label">Amount (mL)</div>
+            <div class="ql-buttons" id="qlBottle">
+              <button class="ql-btn" onclick="selectBottle(30)">30</button>
+              <button class="ql-btn" onclick="selectBottle(40)">40</button>
+              <button class="ql-btn" onclick="selectBottle(50)">50</button>
+              <button class="ql-btn" onclick="selectBottle(60)">60</button>
+              <button class="ql-btn" onclick="selectBottle(70)">70</button>
+              <button class="ql-btn" onclick="selectBottle(80)">80</button>
+              <button class="ql-btn" onclick="selectBottle(90)">90</button>
+              <button class="ql-btn" onclick="selectBottle(100)">100</button>
+              <button class="ql-btn" onclick="selectBottle(110)">110</button>
+              <button class="ql-btn" onclick="selectBottle(120)">120</button>
+              <button class="ql-btn" onclick="selectBottle(130)">130</button>
+              <button class="ql-btn" onclick="selectBottle(140)">140</button>
+              <button class="ql-btn" onclick="selectBottle(150)">150</button>
+            </div>
+          </div>
+          <div class="ql-row">
+            <div class="ql-label">When</div>
+            <div class="ql-time-row">
+              <button class="ql-time-btn selected" onclick="selectTime(0)">Now</button>
+              <button class="ql-time-btn" onclick="selectTime(15)">15m</button>
+              <button class="ql-time-btn" onclick="selectTime(30)">30m</button>
+              <button class="ql-time-btn" onclick="selectTime(45)">45m</button>
+              <button class="ql-time-btn" onclick="selectTime(60)">1h</button>
+              <button class="ql-time-btn" onclick="selectTime(75)">1h15</button>
+              <button class="ql-time-btn" onclick="selectTime(90)">1h30</button>
+              <button class="ql-time-btn" onclick="selectTime(105)">1h45</button>
+              <button class="ql-time-btn" onclick="selectTime(120)">2h</button>
+              <button class="ql-time-btn" onclick="selectTime(135)">2h15</button>
+              <button class="ql-time-btn" onclick="selectTime(150)">2h30</button>
+              <button class="ql-time-btn" onclick="selectTime(165)">2h45</button>
+              <button class="ql-time-btn" onclick="selectTime(180)">3h</button>
+              <button class="ql-time-btn" onclick="selectTime(195)">3h15</button>
+              <button class="ql-time-btn" onclick="selectTime(210)">3h30</button>
+              <button class="ql-time-btn" onclick="selectTime(225)">3h45</button>
+              <button class="ql-time-btn" onclick="selectTime(240)">4h</button>
+              <button class="ql-time-btn" onclick="selectTime(255)">4h15</button>
+              <button class="ql-time-btn" onclick="selectTime(270)">4h30</button>
+              <button class="ql-time-btn" onclick="selectTime(285)">4h45</button>
+              <button class="ql-time-btn" onclick="selectTime(300)">5h</button>
+            </div>
+          </div>
+          <button class="ql-submit" id="qlSubmit" disabled onclick="submitQuickLog()">Select an event to log</button>
+          <div class="ql-status" id="qlStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="recent-wrapper">
+        <div class="section-title">Recent Activity</div>
+        <div class="card recent-card" id="recentLog">
+          <div class="no-session">No entries yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-sections">
+    <div class="commands-card">
+      <div class="commands-toggle" onclick="toggleCommands()">
+        <span class="section-title" style="margin-bottom:0">Voice Commands</span>
+        <span class="arrow" id="cmdArrow">&#9660;</span>
+      </div>
+      <div class="commands-list" id="cmdList">
+        <div class="cmd-group">
+          <div class="cmd-group-title">Nursing</div>
+          <div class="cmd-item">"Hey Siri, run left boob"</div>
+          <div class="cmd-item">"Hey Siri, run right boob"</div>
+          <div class="cmd-item">"Hey Siri, run pause feed"</div>
+          <div class="cmd-item">"Hey Siri, run resume feed"</div>
+          <div class="cmd-item">"Hey Siri, run done feed"</div>
+        </div>
+        <div class="cmd-group">
+          <div class="cmd-group-title">Diapers</div>
+          <div class="cmd-item">"Hey Siri, run pee diaper"</div>
+          <div class="cmd-item">"Hey Siri, run poop diaper"</div>
+          <div class="cmd-item">"Hey Siri, run both diaper"</div>
+        </div>
+        <div class="cmd-group">
+          <div class="cmd-group-title">Bottles</div>
+          <div class="cmd-item">"Hey Siri, run bottle 30" ... "bottle 150"</div>
+          <div class="cmd-item">(every 10 mL)</div>
+        </div>
+        <div class="cmd-group">
+          <div class="cmd-group-title">Sleep</div>
+          <div class="cmd-item">"Hey Siri, run nap"</div>
+          <div class="cmd-item">"Hey Siri, run nap end"</div>
+          <div class="cmd-item">"Hey Siri, run bedtime"</div>
+          <div class="cmd-item">"Hey Siri, run wake up"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mic-hint" id="micHint">Tap to log by voice</div>
+  <button class="mic-fab" id="micFab" onclick="toggleMic()" title="Log by voice">&#127908;</button>
+  <div class="voice-toast" id="voiceToast">
+    <div class="voice-transcript" id="voiceTranscript"></div>
+    <div class="voice-result" id="voiceResult"></div>
+  </div>
+
+<script>
+  // ============================================================
+  // CONFIGURATION — your Apps Script webhook URL
+  // ============================================================
+  var API_URL = 'https://script.google.com/macros/s/AKfycbzwbzz229Yurx8KAq2vPy39_Bg_oeNS17g1JJeztfcGK3qscLboLs8mcxGw8S76VEFVUg/exec';
+
+  // ============================================================
+  // STATE
+  // ============================================================
+  var liveState = null;
+  var liveLeftSec = 0;
+  var liveRightSec = 0;
+  var lastServerFetch = 0;
+  var pollFailCount = 0;
+  var qlAction = '';
+  var qlMinutesAgo = 0;
+  var qlLabel = '';
+
+  // ============================================================
+  // API CALLS — use fetch() instead of google.script.run
+  // ============================================================
+  function apiCall(params) {
+    var url = API_URL + '?' + Object.keys(params).map(function(k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+    }).join('&');
+    return fetch(url).then(function(r) { return r.json(); });
+  }
+
+  // ============================================================
+  // FORMATTING
+  // ============================================================
+  function formatTime(totalSeconds) {
+    var m = Math.floor(totalSeconds / 60);
+    var s = Math.floor(totalSeconds % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+  function formatTimeOnly(isoString) {
+    if (!isoString) return '';
+    var d = new Date(isoString);
+    var h = d.getHours(); var m = String(d.getMinutes()).padStart(2, '0');
+    var ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return h + ':' + m + ' ' + ampm;
+  }
+  function formatDateOnly(isoString) {
+    if (!isoString) return '';
+    var d = new Date(isoString);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getDate();
+  }
+  function formatUpdateTime() {
+    var d = new Date();
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var h = d.getHours(); var m = String(d.getMinutes()).padStart(2, '0');
+    var s = String(d.getSeconds()).padStart(2, '0');
+    var ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return 'Updated ' + months[d.getMonth()] + ' ' + d.getDate() + ', ' + h + ':' + m + ':' + s + ' ' + ampm;
+  }
+  function formatAgo(minutes) {
+    if (minutes === 0) return '';
+    if (minutes < 60) return ' (' + minutes + 'm ago)';
+    var h = Math.floor(minutes / 60); var m = minutes % 60;
+    return m > 0 ? ' (' + h + 'h' + m + 'm ago)' : ' (' + h + 'h ago)';
+  }
+
+  // ============================================================
+  // NURSING DISPLAY
+  // ============================================================
+  function updateNursingDisplay() {
+    if (!liveState || !liveState.active) return;
+    var card = document.getElementById('nursingCard');
+    var content = document.getElementById('nursingContent');
+    var leftSec = liveLeftSec; var rightSec = liveRightSec;
+    if (liveState.status === 'nursing') {
+      var elapsed = (Date.now() - lastServerFetch) / 1000;
+      if (liveState.currentSide === 'left') leftSec += elapsed; else rightSec += elapsed;
+    }
+    var totalSec = leftSec + rightSec;
+    var isNursing = liveState.status === 'nursing';
+    var isPaused = liveState.status === 'paused';
+    card.className = 'card nursing-card' + (isNursing ? ' active' : '') + (isPaused ? ' paused' : '');
+    var dotClass = isPaused ? 'side-active paused-dot' : 'side-active';
+    var statusClass = isNursing ? 'nursing' : 'paused';
+    var statusText = isNursing ? 'Nursing' : 'Paused';
+    var sideText = liveState.currentSide ? ' \u2014 ' + liveState.currentSide + ' breast' : '';
+    var sessionStartStr = liveState.sessionStart ? formatTimeOnly(liveState.sessionStart) : '';
+    content.innerHTML =
+      '<span class="status-badge ' + statusClass + '">' +
+        (isNursing ? '<span class="' + dotClass + '"></span>' : '') +
+        statusText + sideText +
+      '</span>' +
+      (sessionStartStr ? '<div style="font-size:12px;color:#8a8580;margin-bottom:12px;">Started at ' + sessionStartStr + '</div>' : '') +
+      '<div class="timer-row"><span class="timer-label">Total</span><span class="timer-value total">' + formatTime(totalSec) + '</span></div>' +
+      '<div class="divider"></div>' +
+      '<div class="timer-row"><span class="timer-label">Left breast</span><span class="timer-value">' + formatTime(leftSec) + '</span></div>' +
+      '<div class="timer-row"><span class="timer-label">Right breast</span><span class="timer-value">' + formatTime(rightSec) + '</span></div>' +
+      (liveState.pauseCount > 0 ? '<div class="divider"></div><div class="timer-row"><span class="timer-label">Pauses</span><span class="timer-value" style="font-size:20px">' + liveState.pauseCount + '</span></div>' : '');
+  }
+
+  function syncNursingButtons(n) {
+    var ncLeft = document.getElementById('ncLeft');
+    var ncRight = document.getElementById('ncRight');
+    var ncPause = document.getElementById('ncPause');
+    var ncDone = document.getElementById('ncDone');
+    if (!n.active) {
+      ncLeft.classList.remove('active-side'); ncRight.classList.remove('active-side');
+      ncPause.disabled = true; ncPause.classList.remove('is-paused');
+      ncPause.innerHTML = '&#x23F8; Pause';
+      ncPause.onclick = function() { nursingAction('pause_feeding'); };
+      ncDone.disabled = true;
+    } else {
+      ncPause.disabled = false; ncDone.disabled = false;
+      if (n.currentSide === 'left') { ncLeft.classList.add('active-side'); ncRight.classList.remove('active-side'); }
+      else if (n.currentSide === 'right') { ncRight.classList.add('active-side'); ncLeft.classList.remove('active-side'); }
+      if (n.status === 'paused') {
+        ncPause.classList.add('is-paused'); ncPause.innerHTML = '&#x25B6; Resume';
+        ncPause.onclick = function() { nursingAction('resume_feeding'); };
+      } else {
+        ncPause.classList.remove('is-paused'); ncPause.innerHTML = '&#x23F8; Pause';
+        ncPause.onclick = function() { nursingAction('pause_feeding'); };
+      }
+    }
+  }
+
+  function nursingAction(action) {
+    var statusEl = document.getElementById('ncStatus');
+    statusEl.textContent = 'Logging...';
+    apiCall({ action: action })
+      .then(function(result) {
+        statusEl.textContent = result.message || 'Done';
+        setTimeout(function() { statusEl.textContent = ''; }, 2000);
+        fetchStatus();
+      })
+      .catch(function() { statusEl.textContent = 'Error — try again'; });
+  }
+
+  // ============================================================
+  // RECENT LOG
+  // ============================================================
+  function renderRecentLog(entries) {
+    var container = document.getElementById('recentLog');
+    if (!entries || entries.length === 0) { container.innerHTML = '<div class="no-session">No entries yet</div>'; return; }
+    container.innerHTML = entries.map(function(e) {
+      var detail = e.detail || '';
+      var dateDisplay = ''; var timeDisplay = '';
+      if (e.category === 'nursing') {
+        var left = parseFloat(e.leftMin) || 0; var right = parseFloat(e.rightMin) || 0;
+        var total = Math.round((left + right) * 10) / 10;
+        detail = 'T: ' + total + ', L: ' + left + ', R: ' + right + ' min';
+        dateDisplay = formatDateOnly(e.startTime || e.timestamp);
+        timeDisplay = formatTimeOnly(e.startTime) + ' \u2192 ' + formatTimeOnly(e.timestamp);
+      } else if ((e.category === 'nap' || e.category === 'bedtime') && e.detail === 'end' && e.startTime) {
+        detail = e.detail + ' (' + (e.totalMin || '') + ')';
+        dateDisplay = formatDateOnly(e.startTime);
+        timeDisplay = formatTimeOnly(e.startTime) + ' \u2192 ' + formatTimeOnly(e.timestamp);
+      } else {
+        dateDisplay = formatDateOnly(e.timestamp);
+        timeDisplay = formatTimeOnly(e.timestamp);
+      }
+      return '<div class="log-entry">' +
+        '<span class="log-category ' + e.category + '">' + e.category + '</span>' +
+        '<span class="log-detail">' + detail + '</span>' +
+        '<span class="log-date">' + dateDisplay + '</span>' +
+        '<span class="log-time">' + timeDisplay + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ============================================================
+  // APPLY DATA & POLLING
+  // ============================================================
+  function applyData(data) {
+    document.getElementById('lastUpdate').textContent = formatUpdateTime();
+    var n = data.nursing; liveState = n;
+    liveLeftSec = n.leftSeconds; liveRightSec = n.rightSeconds; lastServerFetch = Date.now();
+    var card = document.getElementById('nursingCard'); var content = document.getElementById('nursingContent');
+    if (!n.active) { card.className = 'card nursing-card'; content.innerHTML = '<div class="no-session">No active nursing session</div>'; }
+    else { updateNursingDisplay(); }
+    renderRecentLog(data.recentLog);
+    syncNursingButtons(data.nursing);
+  }
+
+  function fetchStatus() {
+    apiCall({ action: 'status' })
+      .then(function(data) {
+        pollFailCount = 0;
+        document.getElementById('errorNote').style.display = 'none';
+        applyData(data);
+      })
+      .catch(function() {
+        pollFailCount++;
+        if (pollFailCount >= 3) document.getElementById('errorNote').style.display = 'block';
+      });
+  }
+
+  // ============================================================
+  // QUICK LOG
+  // ============================================================
+  function clearSelected(containerId) {
+    document.getElementById(containerId).querySelectorAll('.ql-btn,.ql-time-btn').forEach(function(b) { b.classList.remove('selected'); });
+  }
+  function selectCategory(action, label) {
+    clearSelected('qlCategory'); event.target.classList.add('selected');
+    var bottleRow = document.getElementById('qlBottleRow');
+    if (action === 'bottle') {
+      bottleRow.classList.add('visible'); qlAction = ''; qlLabel = '';
+      document.getElementById('qlSubmit').disabled = true;
+      document.getElementById('qlSubmit').textContent = 'Select bottle amount';
+    } else {
+      bottleRow.classList.remove('visible'); qlAction = action; qlLabel = label;
+      document.getElementById('qlSubmit').disabled = false;
+      document.getElementById('qlSubmit').textContent = 'Log ' + label + formatAgo(qlMinutesAgo);
+    }
+  }
+  function selectBottle(ml) {
+    clearSelected('qlBottle'); event.target.classList.add('selected');
+    qlAction = 'bottle_' + ml; qlLabel = 'bottle ' + ml + ' mL';
+    document.getElementById('qlSubmit').disabled = false;
+    document.getElementById('qlSubmit').textContent = 'Log ' + qlLabel + formatAgo(qlMinutesAgo);
+  }
+  function selectTime(minutes) {
+    document.querySelectorAll('.ql-time-btn').forEach(function(b) { b.classList.remove('selected'); });
+    event.target.classList.add('selected'); qlMinutesAgo = minutes;
+    if (qlAction) document.getElementById('qlSubmit').textContent = 'Log ' + qlLabel + formatAgo(minutes);
+  }
+  function submitQuickLog() {
+    if (!qlAction) return;
+    var btn = document.getElementById('qlSubmit'); var status = document.getElementById('qlStatus');
+    btn.disabled = true; btn.textContent = 'Logging...';
+    apiCall({ action: qlAction, ago: qlMinutesAgo })
+      .then(function(result) {
+        status.textContent = 'Logged: ' + (result.message || qlLabel);
+        status.style.color = '#4a8c6f';
+        btn.textContent = 'Select an event to log';
+        clearSelected('qlCategory'); clearSelected('qlBottle');
+        document.getElementById('qlBottleRow').classList.remove('visible');
+        qlAction = ''; qlLabel = '';
+        setTimeout(fetchStatus, 1000);
+        setTimeout(function() { status.textContent = ''; }, 3000);
+      })
+      .catch(function() {
+        status.textContent = 'Error — try again'; status.style.color = '#c0392b';
+        btn.disabled = false; btn.textContent = 'Log ' + qlLabel;
+      });
+  }
+
+  // ============================================================
+  // VOICE COMMANDS
+  // ============================================================
+  function toggleCommands() {
+    var list = document.getElementById('cmdList'); var arrow = document.getElementById('cmdArrow');
+    var isOpen = list.classList.toggle('open'); arrow.classList.toggle('open', isOpen);
+  }
+
+  // ============================================================
+  // MIC / VOICE LOGGING
+  // ============================================================
+  var recognition = null;
+  var isListening = false;
+
+  setTimeout(function() {
+    var hint = document.getElementById('micHint');
+    hint.classList.add('visible');
+    setTimeout(function() { hint.classList.remove('visible'); }, 3000);
+  }, 2000);
+
+  function toggleMic() {
+    if (isListening) { stopListening(); } else { startListening(); }
+  }
+
+  function startListening() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      showToast('error', '', 'Voice not supported in this browser. Try Chrome.');
+      return;
+    }
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = function() {
+      isListening = true;
+      var fab = document.getElementById('micFab');
+      fab.classList.add('listening'); fab.innerHTML = '&#9209;';
+      showToast('', '', 'Listening...');
+    };
+    recognition.onresult = function(event) {
+      var transcript = event.results[0][0].transcript;
+      processTranscript(transcript);
+    };
+    recognition.onerror = function(event) {
+      stopListening();
+      if (event.error === 'no-speech') showToast('error', '', 'No speech detected. Try again.');
+      else if (event.error === 'not-allowed') showToast('error', '', 'Mic permission denied. Please allow microphone and refresh.');
+      else showToast('error', '', 'Mic error: ' + event.error);
+    };
+    recognition.onend = function() { stopListening(); };
+    recognition.start();
+  }
+
+  function stopListening() {
+    isListening = false;
+    var fab = document.getElementById('micFab');
+    fab.classList.remove('listening'); fab.classList.remove('processing');
+    fab.innerHTML = '&#127908;';
+    if (recognition) { try { recognition.stop(); } catch(e) {} recognition = null; }
+  }
+
+  function processTranscript(transcript) {
+    var fab = document.getElementById('micFab');
+    fab.classList.remove('listening'); fab.classList.add('processing'); fab.innerHTML = '&#9203;';
+    showToast('', transcript, 'Understanding...');
+    apiCall({ action: 'transcript', text: transcript })
+      .then(function(result) {
+        stopListening();
+        if (result.error) {
+          showToast('error', transcript, result.error); speak(result.error);
+        } else {
+          showToast('success', transcript, result.confirmation || 'Logged!');
+          speak(result.confirmation || 'Logged!');
+          setTimeout(fetchStatus, 1000);
+        }
+      })
+      .catch(function() {
+        stopListening(); showToast('error', transcript, 'Something went wrong. Try again.');
+      });
+  }
+
+  function showToast(type, transcript, message) {
+    var toast = document.getElementById('voiceToast');
+    document.getElementById('voiceTranscript').textContent = transcript ? '"' + transcript + '"' : '';
+    document.getElementById('voiceResult').textContent = message;
+    toast.className = 'voice-toast visible' + (type ? ' ' + type : '');
+    if (type === 'success' || type === 'error') setTimeout(function() { toast.classList.remove('visible'); }, 4000);
+  }
+
+  function speak(text) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
+    window.speechSynthesis.speak(u);
+  }
+
+  // ============================================================
+  // INIT
+  // ============================================================
+  fetchStatus();
+  setInterval(fetchStatus, 10000);
+  setInterval(updateNursingDisplay, 1000);
+</script>
+</body>
+</html>

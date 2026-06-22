@@ -175,9 +175,55 @@
     .voice-toast.error { background: #7b2d2d; }
     .voice-transcript { font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 4px; }
     .voice-result { font-weight: 600; }
+
+    /* --- Tabs --- */
+    .tab-bar {
+      display: flex; gap: 0; margin-bottom: 20px; flex-shrink: 0;
+      border-bottom: 2px solid #eae7e3;
+    }
+    .tab-btn {
+      padding: 10px 24px; font-size: 15px; font-weight: 600;
+      border: none; background: none; cursor: pointer; color: #8a8580;
+      border-bottom: 3px solid transparent; margin-bottom: -2px;
+      transition: all 0.15s;
+    }
+    .tab-btn.active { color: #5c4b6e; border-bottom-color: #5c4b6e; }
+    .tab-btn:hover:not(.active) { color: #4a4540; }
+    .tab-content { display: none; }
+    .tab-content.active { display: flex; flex-direction: column; flex: 1; }
+
+    /* --- Reports --- */
+    .reports-grid {
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .report-card {
+      background: white; border-radius: 16px; padding: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #eae7e3;
+    }
+    .report-title {
+      font-size: 15px; font-weight: 600; color: #5c4b6e; margin-bottom: 4px;
+    }
+    .report-subtitle {
+      font-size: 12px; color: #8a8580; margin-bottom: 16px;
+    }
+    .diaper-totals {
+      display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .diaper-total-pill {
+      padding: 6px 14px; border-radius: 20px;
+      font-size: 13px; font-weight: 600;
+    }
+    .pill-pee { background: #fff9c4; color: #8a6d00; }
+    .pill-poop { background: #e8d5c4; color: #5c3a1e; }
+    .pill-mixed { background: #ffe0b2; color: #7a4000; }
+    .pill-total { background: #f0eeeb; color: #4a4540; }
+    .chart-container { position: relative; height: 220px; }
+    .loading-reports { text-align: center; padding: 40px; color: #8a8580; font-size: 14px; }
+
     .mic-hint { position: fixed; bottom: 34px; right: 106px; font-size: 13px; color: #8a8580; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
     .mic-hint.visible { opacity: 1; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -186,6 +232,14 @@
     <p class="subtitle" id="lastUpdate">Loading...</p>
   </div>
 
+  <!-- Tab Bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab-btn" onclick="switchTab('reports')">Reports</button>
+  </div>
+
+  <!-- Dashboard Tab -->
+  <div class="tab-content active" id="tab-dashboard">
   <div class="error-note" id="errorNote">
     Dashboard can't auto-refresh.<br>
     <button class="refresh-btn" onclick="location.reload()">Tap to refresh</button>
@@ -321,6 +375,15 @@
       </div>
     </div>
   </div>
+
+  </div><!-- end tab-dashboard -->
+
+  <!-- Reports Tab -->
+  <div class="tab-content" id="tab-reports">
+    <div class="reports-grid" id="reportsGrid">
+      <div class="loading-reports">Loading reports...</div>
+    </div>
+  </div><!-- end tab-reports -->
 
   <div class="mic-hint" id="micHint">Tap to log by voice</div>
   <button class="mic-fab" id="micFab" onclick="toggleMic('en-US','micFab')" title="Log in English" style="right:106px;">&#127482;&#127480;</button>
@@ -673,6 +736,132 @@
     var u = new SpeechSynthesisUtterance(text);
     u.rate = 1.0; u.pitch = 1.0; u.volume = 1.0;
     window.speechSynthesis.speak(u);
+  }
+
+
+  // ============================================================
+  // TABS
+  // ============================================================
+  var currentTab = 'dashboard';
+  var reportsLoaded = false;
+
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.toggle('active', b.textContent.toLowerCase() === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(function(c) {
+      c.classList.toggle('active', c.id === 'tab-' + tab);
+    });
+    if (tab === 'reports' && !reportsLoaded) {
+      loadReports();
+    }
+  }
+
+  // ============================================================
+  // REPORTS
+  // ============================================================
+  function loadReports() {
+    document.getElementById('reportsGrid').innerHTML = '<div class="loading-reports">Loading reports...</div>';
+    apiCall({ action: 'reports' })
+      .then(function(data) {
+        reportsLoaded = true;
+        renderReports(data);
+      })
+      .catch(function() {
+        document.getElementById('reportsGrid').innerHTML = '<div class="loading-reports">Error loading reports. Try again.</div>';
+      });
+  }
+
+  function renderReports(data) {
+    var grid = document.getElementById('reportsGrid');
+    grid.innerHTML = '';
+
+    // Diaper chart
+    var diapers = data.diapers;
+    var totalPee = diapers.pee.reduce(function(a,b){return a+b;},0);
+    var totalPoop = diapers.poop.reduce(function(a,b){return a+b;},0);
+    var totalMixed = diapers.mixed.reduce(function(a,b){return a+b;},0);
+    var grandTotal = totalPee + totalPoop + totalMixed;
+
+    var card = document.createElement('div');
+    card.className = 'report-card';
+    card.innerHTML =
+      '<div class="report-title">Diaper Changes</div>' +
+      '<div class="report-subtitle">Last 7 days with activity</div>' +
+      '<div class="diaper-totals">' +
+        '<span class="diaper-total-pill pill-pee">&#128740; Pee: ' + totalPee + '</span>' +
+        '<span class="diaper-total-pill pill-poop">&#128169; Poop: ' + totalPoop + '</span>' +
+        '<span class="diaper-total-pill pill-mixed">&#127381; Mixed: ' + totalMixed + '</span>' +
+        '<span class="diaper-total-pill pill-total">Total: ' + grandTotal + '</span>' +
+      '</div>' +
+      '<div class="chart-container"><canvas id="diaperChart"></canvas></div>';
+    grid.appendChild(card);
+
+    // Render chart after DOM is ready
+    setTimeout(function() {
+      var ctx = document.getElementById('diaperChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: diapers.labels,
+          datasets: [
+            {
+              label: 'Pee',
+              data: diapers.pee,
+              backgroundColor: '#FFD700',
+              borderRadius: 4,
+              borderSkipped: false
+            },
+            {
+              label: 'Poop',
+              data: diapers.poop,
+              backgroundColor: '#8B4513',
+              borderRadius: 4,
+              borderSkipped: false
+            },
+            {
+              label: 'Mixed',
+              data: diapers.mixed,
+              backgroundColor: '#FF8C00',
+              borderRadius: 4,
+              borderSkipped: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { font: { size: 12 }, padding: 16 }
+            },
+            tooltip: {
+              callbacks: {
+                footer: function(items) {
+                  var total = items.reduce(function(a,b){return a+b.parsed.y;},0);
+                  return 'Total: ' + total;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { font: { size: 12 } }
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              ticks: { stepSize: 1, font: { size: 12 } },
+              grid: { color: '#f0eeeb' }
+            }
+          }
+        }
+      });
+    }, 100);
   }
 
   // ============================================================

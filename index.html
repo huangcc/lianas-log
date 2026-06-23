@@ -794,11 +794,10 @@
       '<div class="report-title">Diaper Changes</div>' +
       '<div class="report-subtitle">Last 7 days with activity</div>' +
       '<div class="diaper-totals">' +
-        '<span class="diaper-total-pill pill-pee">&#128740; Pee: ' + totalPee + '</span>' +
-        '<span class="diaper-total-pill pill-poop">&#128169; Poop: ' + totalPoop + '</span>' +
-        '<span class="diaper-total-pill pill-mixed">&#127381; Mixed: ' + totalMixed + '</span>' +
-        '<span class="diaper-total-pill pill-total">Total: ' + grandTotal + '</span>' +
-      '</div>' +
+        '<span class="diaper-total-pill pill-pee">💧 Pee: ' + totalPee + '</span>' +
+        '<span class="diaper-total-pill pill-poop">💩 Poop: ' + totalPoop + '</span>' +
+        '<span class="diaper-total-pill pill-mixed">🌪️ Mixed: ' + totalMixed + '</span>' +
+        '</div>' +
       '<div class="chart-container"><canvas id="diaperChart"></canvas></div>';
     grid.appendChild(card);
     
@@ -876,40 +875,23 @@
           }
         }
       });
-      // --- Bottle Scatter Chart ---
+      // --- Bottle + Nursing Scatter Chart ---
       var bottleCtx = document.getElementById('bottleScatterChart').getContext('2d');
-      
-      // Convert feeds to scatter points
-      // x = timeMinutes (0-1439), y = dayIndex
-      var scatterData = bottles.feeds.map(function(f) {
-        return {
-          x: f.timeMinutes,
-          y: f.dayIndex,
-          ml: f.ml,
-          timeStr: f.timeStr,
-          dateStr: f.dateStr
-        };
-      });
-      
-      // Bubble radius: map 30-100 mL to radius 6-22px
+
       function mlToRadius(ml) {
         var clamped = Math.max(30, Math.min(100, ml));
         return 6 + ((clamped - 30) / 70) * 16;
       }
-      
-      // Shift feeds: anything before 8 PM (minute 1200) goes to next-day slot
-      // so the chart runs 8 PM (1200) -> 8 PM next day (2640)
-      var shiftedData = scatterData.map(function(d) {
-        var x = d.x < 1200 ? d.x + 1440 : d.x;
-        return { x: x, y: d.y, r: mlToRadius(d.ml), ml: d.ml, timeStr: d.timeStr, dateStr: d.dateStr };
-      });
+      function minToRadius(min) {
+        var clamped = Math.max(5, Math.min(30, min));
+        return 6 + ((clamped - 5) / 25) * 16;
+      }
+      function shiftX(t) { return t < 1200 ? t + 1440 : t; }
 
-      // Generate tick positions every 2 hours starting at 8 PM
       var tickPositions = [];
       for (var t = 1200; t <= 2640; t += 120) { tickPositions.push(t); }
 
       function minutesToLabel(m) {
-        // Normalize back to 0-1439
         var norm = m >= 1440 ? m - 1440 : m;
         var h = Math.floor(norm / 60);
         var mins = norm % 60;
@@ -921,54 +903,73 @@
       new Chart(bottleCtx, {
         type: 'bubble',
         data: {
-          datasets: [{
-            label: 'Bottle feed',
-            data: shiftedData,
-            backgroundColor: 'rgba(58, 124, 165, 0.7)',
-            borderColor: 'rgba(58, 124, 165, 1)',
-            borderWidth: 1.5
-          }]
+          datasets: [
+            {
+              label: '\uD83D\uDD35 Bottle',
+              data: data.bottles.feeds.map(function(f) {
+                return { x: shiftX(f.timeMinutes), y: f.dayIndex, r: mlToRadius(f.ml),
+                         ml: f.ml, timeStr: f.timeStr, dateStr: f.dateStr, type: 'bottle' };
+              }),
+              backgroundColor: 'rgba(58, 124, 165, 0.7)',
+              borderColor: 'rgba(58, 124, 165, 1)',
+              borderWidth: 1.5
+            },
+            {
+              label: '\uD83D\uDFE3 Nursing',
+              data: data.nursing.feeds.map(function(f) {
+                return { x: shiftX(f.timeMinutes), y: f.dayIndex, r: minToRadius(f.totalMin),
+                         totalMin: f.totalMin, leftMin: f.leftMin, rightMin: f.rightMin,
+                         timeStr: f.timeStr, dateStr: f.dateStr, type: 'nursing' };
+              }),
+              backgroundColor: 'rgba(139, 92, 182, 0.7)',
+              borderColor: 'rgba(139, 92, 182, 1)',
+              borderWidth: 1.5
+            }
+          ]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: false },
+            legend: {
+              position: 'bottom',
+              labels: { font: { size: 12 }, padding: 16 }
+            },
             tooltip: {
               callbacks: {
                 label: function(ctx) {
                   var d = ctx.raw;
-                  return d.dateStr + ' at ' + d.timeStr + ' — ' + d.ml + ' mL';
+                  if (d.type === 'bottle') {
+                    return d.dateStr + ' at ' + d.timeStr + ' \u2014 ' + d.ml + ' mL';
+                  } else {
+                    return [
+                      d.dateStr + ' at ' + d.timeStr,
+                      'Total: ' + d.totalMin + ' min (L: ' + d.leftMin + ', R: ' + d.rightMin + ')'
+                    ];
+                  }
                 }
               }
             }
           },
           scales: {
             x: {
-              min: 1200,
-              max: 2640,
+              min: 1200, max: 2640,
               grid: { color: '#f0eeeb' },
               afterBuildTicks: function(axis) {
                 axis.ticks = tickPositions.map(function(v) { return { value: v }; });
               },
               ticks: {
-                font: { size: 11 },
-                maxRotation: 45,
-                callback: function(val) {
-                  return minutesToLabel(val);
-                }
+                font: { size: 11 }, maxRotation: 45,
+                callback: function(val) { return minutesToLabel(val); }
               }
             },
             y: {
               min: -0.5,
-              max: bottles.labels.length - 0.5,
+              max: data.bottles.labels.length - 0.5,
               grid: { color: '#f0eeeb' },
               ticks: {
-                stepSize: 1,
-                font: { size: 12 },
-                callback: function(val) {
-                  return bottles.labels[Math.round(val)] || '';
-                }
+                stepSize: 1, font: { size: 12 },
+                callback: function(val) { return data.bottles.labels[Math.round(val)] || ''; }
               }
             }
           }

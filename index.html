@@ -897,14 +897,33 @@
         return 6 + ((clamped - 30) / 70) * 16;
       }
       
+      // Shift feeds: anything before 8 PM (minute 1200) goes to next-day slot
+      // so the chart runs 8 PM (1200) -> 8 PM next day (2640)
+      var shiftedData = scatterData.map(function(d) {
+        var x = d.x < 1200 ? d.x + 1440 : d.x;
+        return { x: x, y: d.y, r: mlToRadius(d.ml), ml: d.ml, timeStr: d.timeStr, dateStr: d.dateStr };
+      });
+
+      // Generate tick positions every 2 hours starting at 8 PM
+      var tickPositions = [];
+      for (var t = 1200; t <= 2640; t += 120) { tickPositions.push(t); }
+
+      function minutesToLabel(m) {
+        // Normalize back to 0-1439
+        var norm = m >= 1440 ? m - 1440 : m;
+        var h = Math.floor(norm / 60);
+        var mins = norm % 60;
+        var ampm = h >= 12 ? 'PM' : 'AM';
+        var h12 = h % 12 || 12;
+        return h12 + (mins === 0 ? '' : ':' + String(mins).padStart(2,'0')) + ' ' + ampm;
+      }
+
       new Chart(bottleCtx, {
         type: 'bubble',
         data: {
           datasets: [{
             label: 'Bottle feed',
-            data: scatterData.map(function(d) {
-              return { x: d.x, y: d.y, r: mlToRadius(d.ml), ml: d.ml, timeStr: d.timeStr, dateStr: d.dateStr };
-            }),
+            data: shiftedData,
             backgroundColor: 'rgba(58, 124, 165, 0.7)',
             borderColor: 'rgba(58, 124, 165, 1)',
             borderWidth: 1.5
@@ -929,14 +948,14 @@
               min: 1200,
               max: 2640,
               grid: { color: '#f0eeeb' },
+              afterBuildTicks: function(axis) {
+                axis.ticks = tickPositions.map(function(v) { return { value: v }; });
+              },
               ticks: {
-                stepSize: 120,
                 font: { size: 11 },
+                maxRotation: 45,
                 callback: function(val) {
-                  var h = Math.floor(val / 60);
-                  var ampm = h >= 12 ? 'PM' : 'AM';
-                  var h12 = h % 12 || 12;
-                  return h12 + (h % 60 === 0 ? '' : ':' + String(h % 60).padStart(2,'0')) + ampm;
+                  return minutesToLabel(val);
                 }
               }
             },

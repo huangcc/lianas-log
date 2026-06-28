@@ -447,6 +447,108 @@ function getReportsData() {
     nursingFeeds.push({ dayIndex, dateStr, timeMinutes, timeStr, totalMin, leftMin, rightMin });
   });
 
+  // Build sleep starts — naps from start rows; bedtimes from end rows (day = evening start date)
+  const napStarts = [];
+  const bedtimeStarts = [];
+  const durationByStartKey = {};
+  const bedtimeCompletedStartMs = new Set();
+
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '').toLowerCase();
+    if (category !== 'nap' || detail !== 'end' || !row[3]) return;
+    const startKey = 'nap|' + new Date(row[3]).getTime();
+    const dur = parseDurationMin(row[4]);
+    if (dur) durationByStartKey[startKey] = dur;
+  });
+
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const d = new Date(row[0]);
+    const day = d.toDateString();
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '').toLowerCase();
+
+    if (!diapersByDay[day]) return;
+    if (detail !== 'start') return;
+    if (category !== 'nap') return;
+
+    const hours = d.getHours();
+    const minutes = d.getMinutes();
+    const timeMinutes = hours * 60 + minutes;
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const timeStr = h12 + ':' + String(minutes).padStart(2,'0') + ' ' + ampm;
+    const dateStr = months[d.getMonth()] + ' ' + d.getDate();
+    const dayIndex = sortedDays.indexOf(day);
+    if (dayIndex === -1) return;
+
+    const startKey = 'nap|' + d.getTime();
+    napStarts.push({
+      dayIndex, dateStr, timeMinutes, timeStr,
+      durationMin: durationByStartKey[startKey] || null
+    });
+  });
+
+  // Bedtime: attribute to the evening start day (e.g. 9:30 PM Jun 21 → Jun 21, not wake day)
+  rows.forEach(row => {
+    if (!row[0] || !row[3]) return;
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '').toLowerCase();
+    if (category !== 'bedtime' || detail !== 'end') return;
+
+    const startTime = new Date(row[3]);
+    const day = startTime.toDateString();
+    if (!diapersByDay[day]) return;
+
+    const startMs = startTime.getTime();
+    bedtimeCompletedStartMs.add(startMs);
+
+    const hours = startTime.getHours();
+    const minutes = startTime.getMinutes();
+    const timeMinutes = hours * 60 + minutes;
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const timeStr = h12 + ':' + String(minutes).padStart(2,'0') + ' ' + ampm;
+    const dateStr = months[startTime.getMonth()] + ' ' + startTime.getDate();
+    const dayIndex = sortedDays.indexOf(day);
+    if (dayIndex === -1) return;
+
+    bedtimeStarts.push({
+      dayIndex, dateStr, timeMinutes, timeStr,
+      durationMin: parseDurationMin(row[4])
+    });
+  });
+
+  // In-progress bedtime (started but not yet ended)
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const d = new Date(row[0]);
+    const day = d.toDateString();
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '').toLowerCase();
+
+    if (!diapersByDay[day]) return;
+    if (category !== 'bedtime' || detail !== 'start') return;
+    if (bedtimeCompletedStartMs.has(d.getTime())) return;
+
+    const hours = d.getHours();
+    const minutes = d.getMinutes();
+    const timeMinutes = hours * 60 + minutes;
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const timeStr = h12 + ':' + String(minutes).padStart(2,'0') + ' ' + ampm;
+    const dateStr = months[d.getMonth()] + ' ' + d.getDate();
+    const dayIndex = sortedDays.indexOf(day);
+    if (dayIndex === -1) return;
+
+    bedtimeStarts.push({
+      dayIndex, dateStr, timeMinutes, timeStr,
+      durationMin: null
+    });
+  });
+
   return {
     diapers: {
       labels: labels,
@@ -462,8 +564,24 @@ function getReportsData() {
     nursing: {
       labels: labels,
       feeds: nursingFeeds
+    },
+    sleep: {
+      labels: labels,
+      naps: napStarts,
+      bedtimes: bedtimeStarts
     }
   };
+}
+
+function parseDurationMin(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+  const hMatch = s.match(/(\d+)\s*h/);
+  const mMatch = s.match(/(\d+)\s*m/);
+  let total = 0;
+  if (hMatch) total += parseInt(hMatch[1]) * 60;
+  if (mMatch) total += parseInt(mMatch[1]);
+  return total > 0 ? total : null;
 }
 
 

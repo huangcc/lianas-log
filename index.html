@@ -222,6 +222,26 @@
     .chart-container-tall { position: relative; height: 300px; }
     .time-axis-label { font-size: 11px; color: #8a8580; text-align: center; margin-top: 4px; }
 
+    /* Sleep calendar */
+    .sleep-calendar { margin-top: 4px; }
+    .sleep-calendar-header { display: flex; gap: 12px; margin-bottom: 6px; padding-left: 108px; }
+    .sleep-calendar-header span { flex: 1; font-size: 10px; color: #b0aba5; text-align: center; }
+    .sleep-day-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 8px; }
+    .sleep-day-summary { width: 96px; flex-shrink: 0; font-size: 11px; line-height: 1.45; padding-top: 2px; }
+    .sleep-day-date { font-weight: 600; color: #5c4b6e; font-size: 13px; margin-bottom: 2px; }
+    .sleep-day-stat { color: #8a8580; }
+    .sleep-day-stat.nap { color: #a06828; }
+    .sleep-day-stat.bedtime { color: #5c4b6e; }
+    .sleep-day-timeline { flex: 1; position: relative; height: 40px; background: #f8f7f5; border-radius: 8px; border: 1px solid #f0eeeb; }
+    .sleep-block { position: absolute; height: 15px; border-radius: 4px; min-width: 3px; cursor: default; }
+    .sleep-block.nap { top: 4px; background: #c27b3a; border: 1px solid #a06828; }
+    .sleep-block.bedtime { bottom: 4px; background: #6b5b8a; border: 1px solid #5c4b6e; }
+    .sleep-block.in-progress { opacity: 0.55; border-style: dashed; }
+    .sleep-legend { display: flex; gap: 16px; justify-content: center; margin-top: 12px; font-size: 12px; color: #6b6560; }
+    .sleep-legend span::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+    .sleep-legend .leg-nap::before { background: #c27b3a; }
+    .sleep-legend .leg-bedtime::before { background: #6b5b8a; }
+
     .loading-reports { text-align: center; padding: 40px; color: #8a8580; font-size: 14px; }
 
     .mic-hint { position: fixed; bottom: 34px; right: 106px; font-size: 13px; color: #8a8580; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
@@ -789,6 +809,101 @@
     var grid = document.getElementById('reportsGrid');
     grid.innerHTML = '';
 
+    function formatSleepDuration(min) {
+      if (!min) return '\u2014';
+      var h = Math.floor(min / 60);
+      var m = min % 60;
+      if (h > 0 && m > 0) return h + 'h ' + m + 'm';
+      if (h > 0) return h + 'h';
+      return m + 'm';
+    }
+
+    function sumSleepDuration(events, dayIndex) {
+      return events.filter(function(e) { return e.dayIndex === dayIndex && e.durationMin; })
+        .reduce(function(sum, e) { return sum + e.durationMin; }, 0);
+    }
+
+    function formatEndTime(startMin, durationMin) {
+      var total = startMin + (durationMin || 0);
+      var h = Math.floor(total / 60) % 24;
+      var mins = total % 60;
+      var ampm = h >= 12 ? 'PM' : 'AM';
+      var h12 = h % 12 || 12;
+      return h12 + ':' + String(mins).padStart(2, '0') + ' ' + ampm;
+    }
+
+    function sleepBlockSegment(leftPct, widthPct, type, inProgress, title) {
+      if (widthPct <= 0) return '';
+      return '<div class="sleep-block ' + type + (inProgress ? ' in-progress' : '') + '"' +
+        ' style="left:' + leftPct + '%;width:' + widthPct + '%"' +
+        ' title="' + title.replace(/"/g, '&quot;') + '"></div>';
+    }
+
+    function sleepBlockHtml(event, type) {
+      var dur = event.durationMin || 15;
+      var inProgress = !event.durationMin;
+      var title = event.timeStr;
+      if (event.durationMin) {
+        title += ' \u2013 ' + formatEndTime(event.timeMinutes, event.durationMin);
+        title += ' (' + formatSleepDuration(event.durationMin) + ')';
+      } else {
+        title += ' (in progress)';
+      }
+
+      // Overnight bedtime: show evening + morning wrap on the start day's row
+      if (type === 'bedtime' && event.durationMin) {
+        var startMin = event.timeMinutes;
+        var endMin = startMin + event.durationMin;
+        var html = '';
+        if (startMin < 1440) {
+          var eveDur = Math.min(event.durationMin, 1440 - startMin);
+          html += sleepBlockSegment((startMin / 1440) * 100, (eveDur / 1440) * 100, type, inProgress, title);
+        }
+        if (endMin > 1440) {
+          var morningDur = endMin % 1440;
+          html += sleepBlockSegment(0, (morningDur / 1440) * 100, type, inProgress, title);
+        }
+        return html;
+      }
+
+      var startPct = (event.timeMinutes / 1440) * 100;
+      var widthPct = Math.min((dur / 1440) * 100, 100 - startPct);
+      return sleepBlockSegment(startPct, widthPct, type, inProgress, title);
+    }
+
+    function buildSleepCalendar(sleep) {
+      var labels = sleep.labels || [];
+      var html = '<div class="sleep-calendar">';
+      html += '<div class="sleep-calendar-header">';
+      ['12a', '6a', '12p', '6p', '11p'].forEach(function(t) {
+        html += '<span>' + t + '</span>';
+      });
+      html += '</div>';
+      for (var i = 0; i < labels.length; i++) {
+        var napTotal = sumSleepDuration(sleep.naps, i);
+        var bedTotal = sumSleepDuration(sleep.bedtimes, i);
+        html += '<div class="sleep-day-row">';
+        html += '<div class="sleep-day-summary">';
+        html += '<div class="sleep-day-date">' + labels[i] + '</div>';
+        html += '<div class="sleep-day-stat nap">Naps: ' + formatSleepDuration(napTotal) + '</div>';
+        html += '<div class="sleep-day-stat bedtime">Bed: ' + formatSleepDuration(bedTotal) + '</div>';
+        html += '</div>';
+        html += '<div class="sleep-day-timeline">';
+        sleep.naps.filter(function(e) { return e.dayIndex === i; }).forEach(function(e) {
+          html += sleepBlockHtml(e, 'nap');
+        });
+        sleep.bedtimes.filter(function(e) { return e.dayIndex === i; }).forEach(function(e) {
+          html += sleepBlockHtml(e, 'bedtime');
+        });
+        html += '</div></div>';
+      }
+      html += '<div class="sleep-legend">';
+      html += '<span class="leg-nap">Nap</span>';
+      html += '<span class="leg-bedtime">Bedtime</span>';
+      html += '</div></div>';
+      return html;
+    }
+
     // Diaper chart
     var diapers = data.diapers;
     var totalPee = diapers.pee.reduce(function(a,b){return a+b;},0);
@@ -819,6 +934,17 @@
       '<div class="chart-container-tall"><canvas id="bottleScatterChart"></canvas></div>' +
       '<div class="time-axis-label">Time of day (12:00 AM → 11:59 PM)</div>';
     grid.appendChild(bottleCard);
+
+    // --- Sleep Timing Calendar ---
+    var sleep = data.sleep || { labels: bottles.labels, naps: [], bedtimes: [] };
+    if (!sleep.labels.length) sleep.labels = bottles.labels;
+    var sleepCard = document.createElement('div');
+    sleepCard.className = 'report-card';
+    sleepCard.innerHTML =
+      '<div class="report-title">Sleep Timing</div>' +
+      '<div class="report-subtitle">Last 7 days — blocks show when sleep started and how long it lasted</div>' +
+      buildSleepCalendar(sleep);
+    grid.appendChild(sleepCard);
 
     // Render chart after DOM is ready
     setTimeout(function() {

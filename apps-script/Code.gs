@@ -1,0 +1,537 @@
+// ============================================================
+// LIANA'S LOG — Google Apps Script v16
+// Dashboard is now on GitHub Pages — this file is the webhook/API only
+// Paste this entire file into: Extensions > Apps Script
+// Then deploy as Web App (see setup guide)
+// ============================================================
+
+const LOG_SHEET_NAME = 'Log';
+const SESSION_SHEET_NAME = 'LiveSession';
+
+// --- ENTRY POINT ---
+function doGet(e) {
+  const action = (e.parameter.action || '').toLowerCase();
+  const ago = parseInt(e.parameter.ago) || 0;
+  const timeParam = e.parameter.time || '';
+  
+  var result;
+  if (action === 'status') {
+    result = getStatusData();
+  } else if (action === 'transcript') {
+    const transcript = e.parameter.text || '';
+    result = parseVoiceCommand(transcript);
+  } else if (action === 'reports') {
+    result = getReportsData();
+  } else if (action) {
+    result = processAction(action, ago, timeParam);
+  } else {
+    result = { status: 'ok', message: 'Liana Log API running' };
+  }
+  
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var body = {};
+  try { body = JSON.parse(e.postData.contents); } catch(err) {}
+  const action = (body.action || e.parameter.action || '').toLowerCase();
+  const ago = parseInt(body.ago || e.parameter.ago) || 0;
+  const timeParam = body.time || e.parameter.time || '';
+  
+  var result;
+  if (action === 'status') {
+    result = getStatusData();
+  } else if (action === 'transcript') {
+    const transcript = body.text || e.parameter.text || '';
+    result = parseVoiceCommand(transcript);
+  } else if (action === 'reports') {
+    result = getReportsData();
+  } else if (action) {
+    result = processAction(action, ago, timeParam);
+  } else {
+    result = { status: 'error', message: 'No action specified' };
+  }
+  
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// --- ACTION ROUTER ---
+function processAction(action, agoMinutes, timeParam) {
+  var now;
+  if (timeParam) {
+    now = new Date(timeParam);
+    if (isNaN(now.getTime())) now = new Date(); // fallback if bad date
+  } else {
+    now = new Date();
+    if (agoMinutes && agoMinutes > 0) {
+      now.setMinutes(now.getMinutes() - agoMinutes);
+    }
+  }
+  if (action === 'left_breast') return handleBreast('left', now);
+  if (action === 'right_breast') return handleBreast('right', now);
+  if (action === 'pause_feeding') return handlePause(now);
+  if (action === 'resume_feeding') return handleResume(now);
+  if (action === 'done_feeding') return handleDone(now);
+  if (action === 'pee_diaper') return logSimple(now, 'diaper', 'pee');
+  if (action === 'poop_diaper') return logSimple(now, 'diaper', 'poop');
+  if (action === 'mixed_diaper') return logSimple(now, 'diaper', 'mixed (pee + poop)');
+  const bottleMatch = action.match(/^bottle_(\d+)$/);
+  if (bottleMatch) return logSimple(now, 'bottle', parseInt(bottleMatch[1]) + ' mL');
+  if (action === 'nap_start') return handleSleepStart(now, 'nap');
+  if (action === 'nap_end') return handleSleepEnd(now, 'nap');
+  if (action === 'bedtime') return handleSleepStart(now, 'bedtime');
+  if (action === 'wake_up') return handleSleepEnd(now, 'bedtime');
+  return { status: 'error', message: 'Unknown action: ' + action };
+}
+
+// Called from dashboard via google.script.run
+function manualLog(action, minutesAgo, timeParam) {
+  return processAction(action, parseInt(minutesAgo) || 0, timeParam || '');
+}
+
+function logSimple(now, category, detail) {
+  const sheet = getOrCreateLogSheet();
+  sheet.appendRow([now, category, detail, '', '', '', '', '']);
+  return { status: 'ok', message: category + ': ' + detail };
+}
+
+// --- NURSING SESSION LOGIC ---
+
+function getSessionSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SESSION_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SESSION_SHEET_NAME);
+    sheet.getRange('A1:B1').setValues([['Key', 'Value']]);
+    const keys = [
+      'active', 'current_side', 'status', 'session_start',
+      'left_seconds', 'right_seconds', 'current_side_start',
+      'pause_count', 'last_updated'
+    ];
+    keys.forEach((key, i) => {
+      sheet.getRange(i + 2, 1).setValue(key);
+      sheet.getRange(i + 2, 2).setValue('');
+    });
+  }
+  return sheet;
+}
+
+function getSessionData() {
+  const sheet = getSessionSheet();
+  const data = {};
+  const range = sheet.getRange('A2:B10').getValues();
+  range.forEach(row => { if (row[0]) data[row[0]] = String(row[1]); });
+  return data;
+}
+
+function setSessionData(data) {
+  const sheet = getSessionSheet();
+  const keys = [
+    'active', 'current_side', 'status', 'session_start',
+    'left_seconds', 'right_seconds', 'current_side_start',
+    'pause_count', 'last_updated'
+  ];
+  keys.forEach((key, i) => {
+    sheet.getRange(i + 2, 2).setValue(data[key] !== undefined ? data[key] : '');
+  });
+}
+
+function clearSession() {
+  const sheet = getSessionSheet();
+  for (let i = 2; i <= 10; i++) { sheet.getRange(i, 2).setValue(''); }
+}
+
+function handleBreast(side, now) {
+  const session = getSessionData();
+  if (session.active !== 'true') {
+    setSessionData({
+      active: 'true', current_side: side, status: 'nursing',
+      session_start: now.toISOString(), left_seconds: 0, right_seconds: 0,
+      current_side_start: now.toISOString(), pause_count: 0,
+      last_updated: now.toISOString()
+    });
+    return { status: 'ok', message: 'Started nursing on ' + side + ' breast' };
+  }
+  if (session.status === 'paused') {
+    setSessionData({
+      active: 'true', current_side: side, status: 'nursing',
+      session_start: session.session_start,
+      left_seconds: parseFloat(session.left_seconds) || 0,
+      right_seconds: parseFloat(session.right_seconds) || 0,
+      current_side_start: now.toISOString(),
+      pause_count: parseFloat(session.pause_count) || 0,
+      last_updated: now.toISOString()
+    });
+    return { status: 'ok', message: 'Resumed nursing on ' + side + ' breast' };
+  }
+  const elapsed = (now.getTime() - new Date(session.current_side_start).getTime()) / 1000;
+  const prevSide = session.current_side;
+  let leftSec = parseFloat(session.left_seconds) || 0;
+  let rightSec = parseFloat(session.right_seconds) || 0;
+  if (prevSide === 'left') leftSec += elapsed;
+  else if (prevSide === 'right') rightSec += elapsed;
+  setSessionData({
+    active: 'true', current_side: side, status: 'nursing',
+    session_start: session.session_start, left_seconds: leftSec, right_seconds: rightSec,
+    current_side_start: now.toISOString(),
+    pause_count: parseFloat(session.pause_count) || 0,
+    last_updated: now.toISOString()
+  });
+  return { status: 'ok', message: prevSide !== side ? 'Switched to ' + side + ' breast' : 'Continuing on ' + side + ' breast' };
+}
+
+function handlePause(now) {
+  const session = getSessionData();
+  if (session.active !== 'true') return { status: 'ok', message: 'No active feeding session to pause' };
+  if (session.status === 'paused') return { status: 'ok', message: 'Already paused' };
+  const elapsed = (now.getTime() - new Date(session.current_side_start).getTime()) / 1000;
+  let leftSec = parseFloat(session.left_seconds) || 0;
+  let rightSec = parseFloat(session.right_seconds) || 0;
+  if (session.current_side === 'left') leftSec += elapsed; else rightSec += elapsed;
+  setSessionData({
+    active: 'true', current_side: session.current_side, status: 'paused',
+    session_start: session.session_start, left_seconds: leftSec, right_seconds: rightSec,
+    current_side_start: '',
+    pause_count: (parseFloat(session.pause_count) || 0) + 1,
+    last_updated: now.toISOString()
+  });
+  return { status: 'ok', message: 'Feeding paused' };
+}
+
+function handleResume(now) {
+  const session = getSessionData();
+  if (session.active !== 'true') return { status: 'ok', message: 'No active feeding session to resume' };
+  if (session.status !== 'paused') return { status: 'ok', message: 'Not paused — already nursing' };
+  setSessionData({
+    active: 'true', current_side: session.current_side, status: 'nursing',
+    session_start: session.session_start,
+    left_seconds: parseFloat(session.left_seconds) || 0,
+    right_seconds: parseFloat(session.right_seconds) || 0,
+    current_side_start: now.toISOString(),
+    pause_count: parseFloat(session.pause_count) || 0,
+    last_updated: now.toISOString()
+  });
+  return { status: 'ok', message: 'Resumed on ' + session.current_side + ' breast' };
+}
+
+function handleDone(now) {
+  const session = getSessionData();
+  if (session.active !== 'true') return { status: 'ok', message: 'No active feeding session' };
+  let leftSec = parseFloat(session.left_seconds) || 0;
+  let rightSec = parseFloat(session.right_seconds) || 0;
+  let endTime = now;
+  
+  if (session.status === 'nursing' && session.current_side_start) {
+    // Actively nursing: end time is right now, accumulate current side
+    const elapsed = (now.getTime() - new Date(session.current_side_start).getTime()) / 1000;
+    if (session.current_side === 'left') leftSec += elapsed; else rightSec += elapsed;
+    endTime = now;
+  } else if (session.status === 'paused' && session.last_updated) {
+    // Paused: end time is when we last paused, not now
+    endTime = new Date(session.last_updated);
+  }
+  
+  const totalSec = leftSec + rightSec;
+  const leftMin = Math.round(leftSec / 60 * 10) / 10;
+  const rightMin = Math.round(rightSec / 60 * 10) / 10;
+  const totalMin = Math.round(totalSec / 60 * 10) / 10;
+  const sheet = getOrCreateLogSheet();
+  const startTime = new Date(session.session_start);
+  sheet.appendRow([
+    endTime, 'nursing', 'T: ' + totalMin + ', L: ' + leftMin + ', R: ' + rightMin + ' min',
+    startTime, totalMin, leftMin, rightMin, parseFloat(session.pause_count) || 0
+  ]);
+  clearSession();
+  return { status: 'ok', message: 'Nursing done. Total: ' + totalMin + ' min (L: ' + leftMin + ', R: ' + rightMin + ')' };
+}
+
+// --- SLEEP LOGIC ---
+function handleSleepStart(now, type) {
+  const sheet = getOrCreateLogSheet();
+  sheet.appendRow([now, type, 'start', '', '', '', '', '']);
+  return { status: 'ok', message: type + ' started' };
+}
+
+function handleSleepEnd(now, type) {
+  const sheet = getOrCreateLogSheet();
+  const data = sheet.getDataRange().getValues();
+  let startTime = null;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][1] === type && data[i][2] === 'start') { startTime = new Date(data[i][0]); break; }
+  }
+  let duration = '';
+  if (startTime) {
+    const diffMin = Math.round((now.getTime() - startTime.getTime()) / 60000);
+    const hours = Math.floor(diffMin / 60);
+    const mins = diffMin % 60;
+    duration = hours > 0 ? hours + 'h ' + mins + 'm' : mins + 'm';
+  }
+  sheet.appendRow([now, type, 'end', startTime || '', duration, '', '', '']);
+  return { status: 'ok', message: type + ' ended' + (duration ? ' (' + duration + ')' : '') };
+}
+
+// --- LOG SHEET SETUP ---
+function getOrCreateLogSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(LOG_SHEET_NAME);
+    sheet.getRange('A1:H1').setValues([['Timestamp', 'Category', 'Detail', 'Start Time', 'Total Min', 'Left Min', 'Right Min', 'Pauses']]);
+    sheet.getRange('A1:H1').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 160);
+    sheet.setColumnWidth(4, 160);
+  }
+  return sheet;
+}
+
+// --- STATUS DATA ---
+function getStatusData() {
+  const session = getSessionData();
+  const now = new Date();
+  let leftSec = parseFloat(session.left_seconds) || 0;
+  let rightSec = parseFloat(session.right_seconds) || 0;
+  if (session.active === 'true' && session.status === 'nursing' && session.current_side_start) {
+    const elapsed = (now.getTime() - new Date(session.current_side_start).getTime()) / 1000;
+    if (session.current_side === 'left') leftSec += elapsed; else rightSec += elapsed;
+  }
+  const logSheet = getOrCreateLogSheet();
+  const allData = logSheet.getDataRange().getValues();
+  const recentRows = allData.slice(Math.max(1, allData.length - 20));
+  const recent = recentRows.map(row => ({
+    timestamp: row[0] ? new Date(row[0]).toISOString() : '',
+    category: row[1] || '', detail: row[2] || '',
+    startTime: row[3] ? new Date(row[3]).toISOString() : '',
+    totalMin: row[4] || '', leftMin: row[5] || '', rightMin: row[6] || '', pauses: row[7] || ''
+  })).reverse();
+  return {
+    nursing: {
+      active: session.active === 'true', status: session.status || 'inactive',
+      currentSide: session.current_side || '', leftSeconds: Math.round(leftSec),
+      rightSeconds: Math.round(rightSec), totalSeconds: Math.round(leftSec + rightSec),
+      pauseCount: parseFloat(session.pause_count) || 0, sessionStart: session.session_start || ''
+    },
+    recentLog: recent, serverTime: now.toISOString()
+  };
+}
+
+// Dashboard is hosted on GitHub Pages (index.html)
+
+// --- REPORTS DATA ---
+function getReportsData() {
+  const sheet = getOrCreateLogSheet();
+  const allData = sheet.getDataRange().getValues();
+  
+  // Get last 7 unique days that have data
+  const now = new Date();
+  const rows = allData.slice(1); // skip header
+  
+  // Find the last 7 days that have at least one log entry
+  const daySet = new Set();
+  rows.forEach(row => {
+    if (row[0]) {
+      const d = new Date(row[0]);
+      daySet.add(d.toDateString());
+    }
+  });
+  
+  // Sort days descending, take last 7
+  const sortedDays = Array.from(daySet)
+    .sort((a, b) => new Date(b) - new Date(a))
+    .slice(0, 7)
+    .reverse(); // ascending for chart display
+  
+  // Build diaper counts per day
+  const diapersByDay = {};
+  sortedDays.forEach(day => {
+    diapersByDay[day] = { pee: 0, poop: 0, mixed: 0, total: 0 };
+  });
+  
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const d = new Date(row[0]);
+    const day = d.toDateString();
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '').toLowerCase();
+    
+    if (!diapersByDay[day]) return; // not in our 7-day window
+    
+    if (category === 'diaper') {
+      if (detail === 'pee') diapersByDay[day].pee++;
+      else if (detail === 'poop') diapersByDay[day].poop++;
+      else if (detail.includes('mixed') || detail.includes('both')) diapersByDay[day].mixed++;
+      diapersByDay[day].total++;
+    }
+  });
+  
+  // Format labels as "Jun 15"
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const labels = sortedDays.map(day => {
+    const d = new Date(day);
+    return months[d.getMonth()] + ' ' + d.getDate();
+  });
+  
+  // Build bottle feeds — all bottles in the 7-day window
+  // Each entry: { day (label), timeMinutes (minutes since midnight), ml, timeStr, dateStr }
+  const bottleFeeds = [];
+  
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const d = new Date(row[0]);
+    const day = d.toDateString();
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '');
+    
+    if (!diapersByDay[day]) return; // not in our 7-day window
+    
+    if (category === 'bottle') {
+      const mlMatch = detail.match(/(\d+)/);
+      if (!mlMatch) return;
+      const ml = parseInt(mlMatch[1]);
+      const hours = d.getHours();
+      const minutes = d.getMinutes();
+      const timeMinutes = hours * 60 + minutes;
+      
+      // Format time as "2:34 AM"
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const h12 = hours % 12 || 12;
+      const timeStr = h12 + ':' + String(minutes).padStart(2,'0') + ' ' + ampm;
+      
+      // Date label "Jun 15"
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const dateStr = monthNames[d.getMonth()] + ' ' + d.getDate();
+      
+      // Day index (0 = oldest)
+      const dayIndex = sortedDays.indexOf(day);
+      
+      bottleFeeds.push({ dayIndex, dateStr, timeMinutes, timeStr, ml });
+    }
+  });
+  
+  // Build nursing feeds — use start time (col D) and end time (col A), total min (col E)
+  const nursingFeeds = [];
+  const monthNamesN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const endTime = new Date(row[0]);
+    const category = (row[1] || '').toLowerCase();
+    const detail = (row[2] || '');
+    const startTimeRaw = row[3];
+    const totalMin = parseFloat(row[4]) || 0;
+    const leftMin = parseFloat(row[5]) || 0;
+    const rightMin = parseFloat(row[6]) || 0;
+
+    if (category !== 'nursing') return;
+    if (!startTimeRaw || totalMin <= 0) return;
+
+    const startTime = new Date(startTimeRaw);
+    const day = startTime.toDateString();
+    if (!diapersByDay[day]) return; // not in our 7-day window
+
+    const hours = startTime.getHours();
+    const minutes = startTime.getMinutes();
+    const timeMinutes = hours * 60 + minutes;
+
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h12 = hours % 12 || 12;
+    const timeStr = h12 + ':' + String(minutes).padStart(2,'0') + ' ' + ampm;
+    const dateStr = monthNamesN[startTime.getMonth()] + ' ' + startTime.getDate();
+    const dayIndex = sortedDays.indexOf(day);
+    if (dayIndex === -1) return;
+
+    nursingFeeds.push({ dayIndex, dateStr, timeMinutes, timeStr, totalMin, leftMin, rightMin });
+  });
+
+  return {
+    diapers: {
+      labels: labels,
+      pee: sortedDays.map(d => diapersByDay[d].pee),
+      poop: sortedDays.map(d => diapersByDay[d].poop),
+      mixed: sortedDays.map(d => diapersByDay[d].mixed),
+      total: sortedDays.map(d => diapersByDay[d].total)
+    },
+    bottles: {
+      labels: labels,
+      feeds: bottleFeeds
+    },
+    nursing: {
+      labels: labels,
+      feeds: nursingFeeds
+    }
+  };
+}
+
+
+// --- CLAUDE VOICE PARSING ---
+function parseVoiceCommand(transcript) {
+  var systemPrompt = "You are a baby logging assistant for a newborn named Liana.\n" +
+    "Your job is to parse a parent's natural speech into a structured log action.\n\n" +
+    "Available actions:\n" +
+    "- left_breast: start/switch to left breast nursing\n" +
+    "- right_breast: start/switch to right breast nursing\n" +
+    "- pause_feeding: pause nursing session\n" +
+    "- resume_feeding: resume nursing session\n" +
+    "- done_feeding: end nursing session\n" +
+    "- pee_diaper: wet/pee diaper\n" +
+    "- poop_diaper: dirty/poop diaper\n" +
+    "- mixed_diaper: both pee and poop diaper\n" +
+    "- bottle_NNN: bottle feed where NNN is the exact mL (e.g. bottle_85 for 85 mL)\n" +
+    "- nap_start: nap began\n" +
+    "- nap_end: nap ended\n" +
+    "- bedtime: night sleep started\n" +
+    "- wake_up: woke up from night sleep\n\n" +
+    "Also detect if the event happened in the past. If the user says 'X minutes ago' or 'X hours ago', return agoMinutes as a number. Otherwise return 0.\n\n" +
+    "Respond ONLY with a JSON object, no markdown, no explanation:\n" +
+    "{\"action\": \"action_name_here\", \"agoMinutes\": 0, \"confirmation\": \"A short friendly spoken confirmation\", \"error\": null}\n\n" +
+    "If you cannot understand the command, return:\n" +
+    "{\"action\": null, \"agoMinutes\": 0, \"confirmation\": null, \"error\": \"I didn't catch that. Try saying something like: left breast, pee diaper, or bottle 90.\"}";
+
+  var payload = {
+    model: "claude-sonnet-4-6",
+    max_tokens: 200,
+    system: systemPrompt,
+    messages: [{ role: "user", content: transcript }]
+  };
+
+  var options = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY"),
+      "anthropic-version": "2023-06-01"
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  try {
+    var response = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", options);
+    var json = JSON.parse(response.getContentText());
+    var text = json.content[0].text.replace(/```json|```/g, '').trim();
+    var parsed = JSON.parse(text);
+    if (parsed.action) {
+      var result = processAction(parsed.action, parsed.agoMinutes || 0, '');
+      return {
+        action: parsed.action,
+        agoMinutes: parsed.agoMinutes || 0,
+        confirmation: parsed.confirmation || result.message,
+        error: null
+      };
+    }
+    return parsed;
+  } catch(err) {
+    return { action: null, agoMinutes: 0, confirmation: null, error: "Something went wrong. Please try again." };
+  }
+}
+
+
+function initialSetup() {
+  getOrCreateLogSheet();
+  getSessionSheet();
+  SpreadsheetApp.getActiveSpreadsheet().toast('Setup complete!');
+}

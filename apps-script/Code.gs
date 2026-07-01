@@ -347,8 +347,10 @@ function getReportsData() {
   
   // Build diaper counts per day
   const diapersByDay = {};
+  const intakeByDay = {};
   sortedDays.forEach(day => {
     diapersByDay[day] = { pee: 0, poop: 0, mixed: 0, total: 0 };
+    intakeByDay[day] = { bottleMl: 0, leftMin: 0, rightMin: 0 };
   });
   
   rows.forEach(row => {
@@ -549,6 +551,28 @@ function getReportsData() {
     });
   });
 
+  // Daily intake totals — attributed to log timestamp day (col A)
+  rows.forEach(row => {
+    if (!row[0]) return;
+    const day = new Date(row[0]).toDateString();
+    if (!intakeByDay[day]) return;
+    const category = (row[1] || '').toLowerCase();
+
+    if (category === 'bottle') {
+      const mlMatch = String(row[2] || '').match(/(\d+)/);
+      if (mlMatch) intakeByDay[day].bottleMl += parseInt(mlMatch[1]);
+    } else if (category === 'nursing') {
+      const leftMin = parseFloat(row[5]) || 0;
+      const rightMin = parseFloat(row[6]) || 0;
+      if (leftMin > 0 || rightMin > 0) {
+        intakeByDay[day].leftMin += leftMin;
+        intakeByDay[day].rightMin += rightMin;
+      }
+    }
+  });
+
+  const round1 = v => Math.round(v * 10) / 10;
+
   return {
     diapers: {
       labels: labels,
@@ -569,6 +593,12 @@ function getReportsData() {
       labels: labels,
       naps: napStarts,
       bedtimes: bedtimeStarts
+    },
+    intake: {
+      labels: labels,
+      bottleMl: sortedDays.map(d => intakeByDay[d].bottleMl),
+      leftMin: sortedDays.map(d => round1(intakeByDay[d].leftMin)),
+      rightMin: sortedDays.map(d => round1(intakeByDay[d].rightMin))
     }
   };
 }

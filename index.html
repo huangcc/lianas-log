@@ -923,6 +923,21 @@
         '</div>' +
       '<div class="chart-container"><canvas id="diaperChart"></canvas></div>';
     grid.appendChild(card);
+
+    // --- Daily Intake Stacked Bar ---
+    var intake = data.intake || {
+      labels: diapers.labels,
+      bottleMl: diapers.labels.map(function() { return 0; }),
+      leftMin: diapers.labels.map(function() { return 0; }),
+      rightMin: diapers.labels.map(function() { return 0; })
+    };
+    var intakeCard = document.createElement('div');
+    intakeCard.className = 'report-card';
+    intakeCard.innerHTML =
+      '<div class="report-title">Daily Intake</div>' +
+      '<div class="report-subtitle">Last 7 days — stacked segments: bottle mL + nursing min (L / R)</div>' +
+      '<div class="chart-container"><canvas id="intakeChart"></canvas></div>';
+    grid.appendChild(intakeCard);
     
     // --- Bottle Feed Scatter Chart ---
     var bottles = data.bottles;
@@ -1009,6 +1024,84 @@
           }
         }
       });
+
+      // --- Daily Intake Stacked Bar ---
+      var intakeCtx = document.getElementById('intakeChart').getContext('2d');
+      new Chart(intakeCtx, {
+        type: 'bar',
+        data: {
+          labels: intake.labels,
+          datasets: [
+            {
+              label: 'Bottle (mL)',
+              data: intake.bottleMl,
+              backgroundColor: '#3a7ca5',
+              stack: 'intake',
+              borderRadius: 4,
+              borderSkipped: false
+            },
+            {
+              label: 'Left (min)',
+              data: intake.leftMin,
+              backgroundColor: '#5c4b6e',
+              stack: 'intake',
+              borderRadius: 4,
+              borderSkipped: false
+            },
+            {
+              label: 'Right (min)',
+              data: intake.rightMin,
+              backgroundColor: '#9b7ec8',
+              stack: 'intake',
+              borderRadius: 4,
+              borderSkipped: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { font: { size: 12 }, padding: 16 }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  var val = ctx.parsed.y;
+                  if (ctx.datasetIndex === 0) return 'Bottle: ' + val + ' mL';
+                  if (ctx.datasetIndex === 1) return 'Left: ' + val + ' min';
+                  return 'Right: ' + val + ' min';
+                },
+                footer: function(items) {
+                  if (!items.length) return '';
+                  var idx = items[0].dataIndex;
+                  var ml = intake.bottleMl[idx] || 0;
+                  var left = intake.leftMin[idx] || 0;
+                  var right = intake.rightMin[idx] || 0;
+                  var nursing = Math.round((left + right) * 10) / 10;
+                  return 'Total: ' + ml + ' mL + ' + nursing + ' min nursing (L: ' + left + ', R: ' + right + ')';
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { font: { size: 12 } }
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              ticks: { font: { size: 12 } },
+              grid: { color: '#f0eeeb' }
+            }
+          }
+        }
+      });
+
       // --- Bottle + Nursing Scatter Chart ---
       var bottleCtx = document.getElementById('bottleScatterChart').getContext('2d');
 
